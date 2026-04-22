@@ -15,36 +15,69 @@ pub fn read_hdf5<T: hdf5::H5Type + Clone>(filename: &str, dataset : &str) -> hdf
     dataset.read_slice_1d::<T,_>(s![..]).map(|v| v.to_vec())
 }
 
+pub enum DatasetShape {
+    Scalar,
+    Vector(usize),
+    Matrix(usize, usize),
+}
+
 pub struct Hdf5Writer<T: hdf5::H5Type>{
     #[allow(dead_code)]
     _file     : Rc<hdf5::File>, // file needs to live while dataset lives, this is a way of ensuring that
     dataset   : hdf5::Dataset,
     chunk_size: usize,
     cache     : RefCell<Vec<T>>,
+    shape     : DatasetShape,
 }
 
 
 impl<T: hdf5::H5Type> Hdf5Writer<T>{
-    pub fn new(file: Rc<hdf5::File>, dataset: &str, chunk_size: usize) -> hdf5::Result<Self> {
+    pub fn new(file: Rc<hdf5::File>, dataset: &str, chunk_size: usize, shape: DatasetShape) -> hdf5::Result<Self> {
         if chunk_size == 0 {
             return Err(Error::Internal("Hdf5Writer::new: invalid chunk size 0".to_owned()));
         }
-        let dataset = file.new_dataset::<T>()
-            .chunk((chunk_size,))
-            .blosc_zlib(4, BloscShuffle::Byte)
-            .shape(Extent::resizable(0))
-            .create(dataset)?;
+        let dataset = match shape {
+            DatasetShape::Scalar      => file.new_dataset::<T>()
+                                             .chunk((chunk_size,))
+                                             .blosc_zlib(4, BloscShuffle::Byte)
+                                             .shape(Extent::resizable(0))
+                                             .create(dataset)?,
+            DatasetShape::Vector(n)   => file.new_dataset::<T>()
+                                             .chunk((chunk_size, n))
+                                             .blosc_zlib(4, BloscShuffle::Byte)
+                                             .shape((Extent::resizable(0), n))
+                                             .create(dataset)?,
+            DatasetShape::Matrix(r,c) => file.new_dataset::<T>()
+                                             .chunk((chunk_size, r, c))
+                                             .blosc_zlib(4, BloscShuffle::Byte)
+                                             .shape((Extent::resizable(0), r, c))
+                                             .create(dataset)?,
+
+        };
 
         let cache = Vec::with_capacity(chunk_size);
-        Ok(Hdf5Writer{_file: file, dataset, chunk_size, cache: RefCell::new(cache)})
+        Ok(Hdf5Writer{_file: file, dataset, chunk_size, cache: RefCell::new(cache), shape})
     }
+
 
     fn dump_cache(&self) -> Result<()> {
         let n_write = self.cache.borrow().len();
         if n_write > 0 {
-            let size_before = self.dataset.size();
-            self.dataset.resize(size_before + n_write)?;
-            self.dataset.write_slice(&self.cache.borrow()[..], size_before..)?;
+            let size_before = self.dataset.shape()[0];
+            match self.shape {
+                DatasetShape::Scalar      => {
+                    self.dataset.resize( size_before + n_write       )?;
+                    self.dataset.write_slice(&self.cache.borrow()[..], size_before..)?;
+                },
+                DatasetShape::Vector(n)   => {
+                    self.dataset.resize((size_before + n_write, n   ))?;
+                    self.dataset.write_slice(&self.cache.borrow()[..], (size_before.., ..))?;
+                },
+                DatasetShape::Matrix(r,c) => {
+                    self.dataset.resize((size_before + n_write, r, c))?;
+                    self.dataset.write_slice(&self.cache.borrow()[..], (size_before.., .., ..))?;
+                },
+            }
             self.cache.borrow_mut().clear();
         }
         Ok(())

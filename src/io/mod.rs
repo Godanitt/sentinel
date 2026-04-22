@@ -7,6 +7,7 @@ pub use csv::CsvWriter;
 
 pub use hdf5::read_hdf5;
 pub use hdf5::Hdf5Writer;
+pub use hdf5::DatasetShape;
 
 use std::io;
 pub trait Writer<T> {
