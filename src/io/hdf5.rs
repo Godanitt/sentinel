@@ -5,7 +5,7 @@ use std::rc::Rc;
 use hdf5_metno::{self as hdf5, Error, Extent};
 use hdf5_metno::filters::BloscShuffle;
 
-use ndarray::{s, Array, ArrayViewD, Dimension, IxDyn};
+use ndarray::{s, arr0, Array, ArrayViewD, Dimension, IxDyn};
 
 use crate::io::Writer;
 
@@ -15,14 +15,6 @@ pub fn read_hdf5<T: hdf5::H5Type + Clone>(filename: &str, dataset : &str) -> hdf
     dataset.read_slice_1d::<T,_>(s![..]).map(|v| v.to_vec())
 }
 
-pub struct ScalarHdf5Writer<T: hdf5::H5Type>{
-    #[allow(dead_code)]
-    _file     : Rc<hdf5::File>, // file needs to live while dataset lives, this is a way of ensuring that
-    dataset   : hdf5::Dataset,
-    chunk_size: usize,
-    cache     : RefCell<Vec<T>>,
-}
-
 pub struct ArrayHdf5Writer<T: hdf5::H5Type>{
     #[allow(dead_code)]
     _file     : Rc<hdf5::File>, // file needs to live while dataset lives, this is a way of ensuring that
@@ -30,6 +22,18 @@ pub struct ArrayHdf5Writer<T: hdf5::H5Type>{
     chunk_size: usize,
     cache     : RefCell<Vec<T>>,
     shape     : Vec<usize>,
+}
+
+pub struct ScalarHdf5Writer<T: hdf5::H5Type>(ArrayHdf5Writer<T>);
+
+impl<T: hdf5::H5Type> ScalarHdf5Writer<T> {
+    pub fn new(file: Rc<hdf5::File>, dataset: &str, chunk_size: usize) -> hdf5::Result<Self> {
+        ArrayHdf5Writer::new(file, dataset, chunk_size, vec![]).map(Self)
+    }
+
+    pub fn flush(&self) -> Result<()> {
+        self.0.flush()
+    }
 }
 
 impl<T: hdf5::H5Type> ArrayHdf5Writer<T> {
@@ -112,51 +116,10 @@ impl<T: hdf5::H5Type> ArrayHdf5Writer<T> {
 
 }
 
-impl<T: hdf5::H5Type> ScalarHdf5Writer<T>{
-    pub fn new(file: Rc<hdf5::File>, dataset: &str, chunk_size: usize) -> hdf5::Result<Self> {
-        if chunk_size == 0 {
-            return Err(Error::Internal("Hdf5Writer::new: invalid chunk size 0".to_owned()));
-        }
-        let dataset = file.new_dataset::<T>()
-                          .chunk((chunk_size,))
-                          .blosc_zlib(4, BloscShuffle::Byte)
-                          .shape(Extent::resizable(0))
-                          .create(dataset)?;
-
-        let cache = Vec::with_capacity(chunk_size);
-        Ok(ScalarHdf5Writer{_file: file, dataset, chunk_size, cache: RefCell::new(cache)})
-    }
-
-    fn dump_cache(&self) -> Result<()> {
-        let n_write = self.cache.borrow().len();
-        if n_write > 0 {
-            let size_before = self.dataset.shape()[0];
-            self.dataset.resize( size_before + n_write       )?;
-            self.dataset.write_slice(&self.cache.borrow()[..], size_before..)?;
-
-            self.cache.borrow_mut().clear();
-        }
-        Ok(())
-    }
-
-    fn write(&self, item: T) -> Result<()> {
-        self.cache.borrow_mut().push(item);
-
-        if self.cache.borrow().len() == self.chunk_size {
-            self.dump_cache()
-        }
-        else {
-            Ok(())
-        }
-    }
-
-    pub fn flush(&self) -> Result<()> {
-        self.dump_cache()
-    }
-}
-
 impl<T: hdf5::H5Type> Writer<T> for ScalarHdf5Writer<T> {
-    fn write(&self, value: T) -> Result<()> { self.write(value) }
+    fn write(&self, value: T) -> Result<()> {
+        self.0.write(arr0(value))
+    }
 }
 
 impl<T: hdf5::H5Type> Drop for ScalarHdf5Writer<T> {
