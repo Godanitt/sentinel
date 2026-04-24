@@ -11,7 +11,7 @@ use sentinel::configure::trajectories::Configure;
 use sentinel::geometry::Cone;
 use sentinel::field::Field;
 use sentinel::tracker::Tracker;
-use sentinel::io::{Writer, CsvWriter, Hdf5Writer, DatasetShape};
+use sentinel::io::{Writer, CsvWriter, ScalarHdf5Writer};
 use sentinel::io::hdf5_types::Endpoint;
 use sentinel::invalid_input;
 use sentinel::progress::MaybeProgressBar;
@@ -72,7 +72,7 @@ pub fn main() -> Result<()> {
         }
         else {
             let file = hdf5::File::create(&path.to_str().unwrap()).unwrap();
-            Box::new(Hdf5Writer::<Endpoint>::new(Rc::new(file), "endpoints", 1024, DatasetShape::Scalar).unwrap())
+            Box::new(ScalarHdf5Writer::<Endpoint>::new(Rc::new(file), "endpoints", 1024).unwrap())
         };
 
     println!("Initialization time: {:?}", timer.elapsed().as_secs_f64());

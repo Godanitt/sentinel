@@ -13,7 +13,7 @@ use sentinel::configure::detsim::Configure;
 use sentinel::field::Field;
 use sentinel::geometry::Cone;
 use sentinel::invalid_input;
-use sentinel::io::{Writer, Hdf5Writer, read_hdf5, DatasetShape};
+use sentinel::io::{Writer, ScalarHdf5Writer, read_hdf5};
 use sentinel::io::hdf5_types::{IonizationHit, SensorHit};
 use sentinel::lt::{S1LightTable, S2LightTable};
 use sentinel::medium::Medium;
@@ -70,7 +70,7 @@ pub fn main() -> Result<()> {
     let (fractions, constants) = args.medium.time_constants();
 
     let ofile  = hdf5::File::create(&path.to_str().unwrap()).unwrap();
-    let writer = Hdf5Writer::<SensorHit>::new(Rc::new(ofile), "/MC/sensor_hits", 1024, DatasetShape::Scalar).unwrap();
+    let writer = ScalarHdf5Writer::<SensorHit>::new(Rc::new(ofile), "/MC/sensor_hits", 1024).unwrap();
 
     println!("Initialization time: {:?}", timer.elapsed().as_secs_f64());
 

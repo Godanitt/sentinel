@@ -5,7 +5,7 @@ use std::rc::Rc;
 use hdf5_metno::{self as hdf5, Error, Extent};
 use hdf5_metno::filters::BloscShuffle;
 
-use ndarray::s;
+use ndarray::{s, Array, ArrayViewD, Dimension, IxDyn};
 
 use crate::io::Writer;
 
@@ -15,75 +15,131 @@ pub fn read_hdf5<T: hdf5::H5Type + Clone>(filename: &str, dataset : &str) -> hdf
     dataset.read_slice_1d::<T,_>(s![..]).map(|v| v.to_vec())
 }
 
-pub enum DatasetShape {
-    Scalar,
-    Vector(usize),
-    Matrix(usize, usize),
-}
-
-pub struct Hdf5Writer<T: hdf5::H5Type>{
+pub struct ScalarHdf5Writer<T: hdf5::H5Type>{
     #[allow(dead_code)]
     _file     : Rc<hdf5::File>, // file needs to live while dataset lives, this is a way of ensuring that
     dataset   : hdf5::Dataset,
     chunk_size: usize,
     cache     : RefCell<Vec<T>>,
-    shape     : DatasetShape,
 }
 
+pub struct ArrayHdf5Writer<T: hdf5::H5Type>{
+    #[allow(dead_code)]
+    _file     : Rc<hdf5::File>, // file needs to live while dataset lives, this is a way of ensuring that
+    dataset   : hdf5::Dataset,
+    chunk_size: usize,
+    cache     : RefCell<Vec<T>>,
+    shape     : Vec<usize>,
+}
 
-impl<T: hdf5::H5Type> Hdf5Writer<T>{
-    pub fn new(file: Rc<hdf5::File>, dataset: &str, chunk_size: usize, shape: DatasetShape) -> hdf5::Result<Self> {
+impl<T: hdf5::H5Type> ArrayHdf5Writer<T> {
+    pub fn new(file: Rc<hdf5::File>, dataset: &str, chunk_size: usize, shape: Vec<usize>) -> hdf5::Result<Self> {
         if chunk_size == 0 {
             return Err(Error::Internal("Hdf5Writer::new: invalid chunk size 0".to_owned()));
         }
-        let dataset = match shape {
-            DatasetShape::Scalar      => file.new_dataset::<T>()
-                                             .chunk((chunk_size,))
-                                             .blosc_zlib(4, BloscShuffle::Byte)
-                                             .shape(Extent::resizable(0))
-                                             .create(dataset)?,
-            DatasetShape::Vector(n)   => file.new_dataset::<T>()
-                                             .chunk((chunk_size, n))
-                                             .blosc_zlib(4, BloscShuffle::Byte)
-                                             .shape((Extent::resizable(0), n))
-                                             .create(dataset)?,
-            DatasetShape::Matrix(r,c) => file.new_dataset::<T>()
-                                             .chunk((chunk_size, r, c))
-                                             .blosc_zlib(4, BloscShuffle::Byte)
-                                             .shape((Extent::resizable(0), r, c))
-                                             .create(dataset)?,
 
-        };
+        let mut full_chunk_size = vec![chunk_size];
+        full_chunk_size.extend_from_slice(&shape);
 
+        let mut full_shape = vec![Extent::resizable(0)];
+        shape.iter()
+             .map(|s| Extent::fixed(*s))
+             .for_each(|s| full_shape.push(s));
+
+        let dataset = file.new_dataset::<T>()
+                          .chunk(full_chunk_size.as_slice())
+                          .blosc_zlib(4, BloscShuffle::Byte)
+                          .shape(full_shape.as_slice())
+                          .create(dataset)?;
+
+        let chunk_size = chunk_size * shape.iter().product::<usize>();
         let cache = Vec::with_capacity(chunk_size);
-        Ok(Hdf5Writer{_file: file, dataset, chunk_size, cache: RefCell::new(cache), shape})
+        Ok(ArrayHdf5Writer{_file: file, dataset, chunk_size, cache: RefCell::new(cache), shape})
     }
 
+    fn dump_cache(&self) -> Result<()> {
+        let n_write = self.cache.borrow().len().div_euclid(self.shape.iter().product());
+        if n_write == 0 { return Ok(()) }
+
+        let     size_before = self.dataset.shape()[0];
+        let mut size_new    = self.shape.clone();
+        size_new.insert(0, size_before + n_write);
+
+        self.dataset.resize(size_new.as_slice())?;
+
+        let mut data = vec![hdf5::SliceOrIndex::SliceCount {
+            start: size_before,
+            count: n_write,
+            step : 1,
+            block: 1,
+        }];
+        for _ in &self.shape {
+            data.push(hdf5::SliceOrIndex::Unlimited {
+                start: 0,
+                step : 1,
+                block: 1,
+            });
+        }
+        let data = hdf5::Selection::from(hdf5::Hyperslab::from(data));
+
+        let mut shape = self.shape.clone(); shape.insert(0, n_write);
+        let shape = IxDyn(&shape);
+
+        let cache = self.cache.borrow();
+        let view = ArrayViewD::from_shape(shape, &cache[..]).expect("Shape error");
+        self.dataset.write_slice(view, data)?;
+
+        drop(cache); // explicit drop to avoid holding immutable borrow
+        self.cache.borrow_mut().clear();
+
+        Ok(())
+    }
+
+    fn write<D: Dimension>(&self, item: Array<T,D>) -> Result<()> {
+        self.cache.borrow_mut().extend(item.into_iter());
+
+        if self.cache.borrow().len() == self.chunk_size {
+            self.dump_cache()
+        }
+        else {
+            Ok(())
+        }
+    }
+
+    pub fn flush(&self) -> Result<()> {
+        self.dump_cache()
+    }
+
+}
+
+impl<T: hdf5::H5Type> ScalarHdf5Writer<T>{
+    pub fn new(file: Rc<hdf5::File>, dataset: &str, chunk_size: usize) -> hdf5::Result<Self> {
+        if chunk_size == 0 {
+            return Err(Error::Internal("Hdf5Writer::new: invalid chunk size 0".to_owned()));
+        }
+        let dataset = file.new_dataset::<T>()
+                          .chunk((chunk_size,))
+                          .blosc_zlib(4, BloscShuffle::Byte)
+                          .shape(Extent::resizable(0))
+                          .create(dataset)?;
+
+        let cache = Vec::with_capacity(chunk_size);
+        Ok(ScalarHdf5Writer{_file: file, dataset, chunk_size, cache: RefCell::new(cache)})
+    }
 
     fn dump_cache(&self) -> Result<()> {
         let n_write = self.cache.borrow().len();
         if n_write > 0 {
             let size_before = self.dataset.shape()[0];
-            match self.shape {
-                DatasetShape::Scalar      => {
-                    self.dataset.resize( size_before + n_write       )?;
-                    self.dataset.write_slice(&self.cache.borrow()[..], size_before..)?;
-                },
-                DatasetShape::Vector(n)   => {
-                    self.dataset.resize((size_before + n_write, n   ))?;
-                    self.dataset.write_slice(&self.cache.borrow()[..], (size_before.., ..))?;
-                },
-                DatasetShape::Matrix(r,c) => {
-                    self.dataset.resize((size_before + n_write, r, c))?;
-                    self.dataset.write_slice(&self.cache.borrow()[..], (size_before.., .., ..))?;
-                },
-            }
+            self.dataset.resize( size_before + n_write       )?;
+            self.dataset.write_slice(&self.cache.borrow()[..], size_before..)?;
+
             self.cache.borrow_mut().clear();
         }
         Ok(())
     }
 
-    pub fn write(&self, item: T) -> Result<()> {
+    fn write(&self, item: T) -> Result<()> {
         self.cache.borrow_mut().push(item);
 
         if self.cache.borrow().len() == self.chunk_size {
@@ -99,11 +155,21 @@ impl<T: hdf5::H5Type> Hdf5Writer<T>{
     }
 }
 
-impl<T: hdf5::H5Type> Writer<T> for Hdf5Writer<T> {
+impl<T: hdf5::H5Type> Writer<T> for ScalarHdf5Writer<T> {
     fn write(&self, value: T) -> Result<()> { self.write(value) }
 }
 
-impl<T: hdf5::H5Type> Drop for Hdf5Writer<T> {
+impl<T: hdf5::H5Type> Drop for ScalarHdf5Writer<T> {
+    fn drop(&mut self) {
+        self.flush().unwrap()
+    }
+}
+
+impl<T: hdf5::H5Type, D:Dimension> Writer<Array<T,D>> for ArrayHdf5Writer<T> {
+    fn write(&self, value: Array<T,D>) -> Result<()> { self.write(value) }
+}
+
+impl<T: hdf5::H5Type> Drop for ArrayHdf5Writer<T> {
     fn drop(&mut self) {
         self.flush().unwrap()
     }
@@ -153,7 +219,7 @@ mod tests {
     fn dataset_writer_new() {
         let (_dir, filename) = tempfile("dataset_writer_new");
         let file             = hdf5::File::create(filename).unwrap();
-        let writer           = Hdf5Writer::<Endpoint>::new(Rc::new(file), "a_dataset", 123);
+        let writer           = ScalarHdf5Writer::<Endpoint>::new(Rc::new(file), "a_dataset", 123);
         assert!(writer.is_ok());
     }
 
@@ -161,7 +227,7 @@ mod tests {
     fn dataset_writer_new_invalid_filename() {
         let (_dir, filename) = tempfile("dataset_writer_new");
         let file             = hdf5::File::create(filename).unwrap();
-        let writer           = Hdf5Writer::<Endpoint>::new(Rc::new(file), "", 123);
+        let writer           = ScalarHdf5Writer::<Endpoint>::new(Rc::new(file), "", 123);
         assert!(writer.is_err());
     }
 
@@ -169,7 +235,7 @@ mod tests {
     fn dataset_writer_new_invalid_chunksize() {
         let (_dir, filename) = tempfile("dataset_writer_new");
         let file             = hdf5::File::create(filename).unwrap();
-        let writer           = Hdf5Writer::<Endpoint>::new(Rc::new(file), "a_dataset", 0);
+        let writer           = ScalarHdf5Writer::<Endpoint>::new(Rc::new(file), "a_dataset", 0);
         assert!(writer.is_err());
     }
 
@@ -177,7 +243,7 @@ mod tests {
     fn dataset_writer_round_trip_single() {
         let (_dir, filename) = tempfile("round_trip_single");
         let file             = hdf5::File::create(filename.clone()).unwrap();
-        let writer           = Hdf5Writer::<Endpoint>::new(Rc::new(file), "a_dataset", 1).unwrap();
+        let writer           = ScalarHdf5Writer::<Endpoint>::new(Rc::new(file), "a_dataset", 1).unwrap();
 
         let data_written = extremes().0;
         writer.write(data_written).unwrap();
@@ -201,7 +267,7 @@ mod tests {
     fn dataset_writer_flushes_on_drop() {
         let (_dir, filename) = tempfile("flush_on_drop");
         let file             = hdf5::File::create(filename.clone()).unwrap();
-        let writer           = Hdf5Writer::<Endpoint>::new(Rc::new(file), "a_dataset", 10).unwrap();
+        let writer           = ScalarHdf5Writer::<Endpoint>::new(Rc::new(file), "a_dataset", 10).unwrap();
 
         let data_written = extremes().0;
         writer.write(data_written).unwrap();
