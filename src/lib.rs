@@ -9,6 +9,7 @@ pub mod medium;
 pub mod progress;
 pub mod random;
 pub mod sampler;
+pub mod sensor_db;
 pub mod tracker;
 pub mod utils;
 
