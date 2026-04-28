@@ -1,5 +1,6 @@
 pub mod configure;
 pub mod geometry;
+pub mod electronics;
 pub mod field;
 pub mod field_point;
 pub mod generator;
