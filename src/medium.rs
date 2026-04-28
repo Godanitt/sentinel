@@ -1,4 +1,5 @@
 use crate::io::read_csv;
+use crate::utils::interpolate_1d;
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum Medium {
@@ -36,8 +37,8 @@ impl Medium {
         }
     }
 
-    pub fn pulse_shape(medium: Medium) -> (Vec<f64>, Vec<f64>) {
-        match medium {
+    pub fn pulse_shape(&self, sampling_time_mus: f64) -> Vec<f32> {
+        let (time, amplitude) = match self {
             Medium::Xenon => {
                 let mut data = read_csv("data/pulse_shape_vuv4_lxe.csv", " ", 0).expect("Could not read file");
                 (data.remove(0), data.remove(0))
@@ -47,7 +48,17 @@ impl Medium {
                 (data.remove(0), data.remove(0))
             },
             Medium::Krypton => unimplemented!(),
-        }
+        };
+        let time = time.into_iter().map(|t| t*1e-3).collect();
+        let out = (0..200).map(|i| (i as f64) * sampling_time_mus)
+                          .filter_map(|t| interpolate_1d(&time, &amplitude, t).ok())
+                          .collect::<Vec<_>>();
+
+        let norm = out.iter().sum::<f64>();
+        out.into_iter()
+           .map(|x| (x / norm) as f32)
+           .collect()
+    }
     }
 }
 
