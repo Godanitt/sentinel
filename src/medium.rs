@@ -59,6 +59,14 @@ impl Medium {
            .map(|x| (x / norm) as f32)
            .collect()
     }
+
+    pub fn noise_prob(&self, sampling_time_mus: f64, sipm_size_mm2: f64) -> f64 {
+        let freq = match self { // Hz
+            Medium::Xenon   => 0.137   , // https://www.sciencedirect.com/science/article/pii/S0168900224002730
+            Medium::Argon   => 0.978e-5, // extrapolated from above
+            Medium::Krypton => 0.134e-3, // extrapolated from above
+        };
+        freq * 1e-6 * sipm_size_mm2 * sampling_time_mus // per sampling time
     }
 }
 
