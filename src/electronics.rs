@@ -54,7 +54,7 @@ pub fn apply_pulse_shape(wfs: Waveforms<u16>, pulse_shape: &Vec<f32>) -> Wavefor
     Waveforms{event, data:wfs}
 }
 
-pub fn add_noise(wfs: Waveforms<u16>, p: f64) -> Waveforms<u16> {
+pub fn add_dark_noise(wfs: Waveforms<u16>, p: f64) -> Waveforms<u16> {
     let Waveforms{event, mut data} = wfs;
 
     data.iter_mut()

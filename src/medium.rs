@@ -60,7 +60,7 @@ impl Medium {
            .collect()
     }
 
-    pub fn noise_prob(&self, sampling_time_mus: f64, sipm_size_mm2: f64) -> f64 {
+    pub fn dark_noise_prob(&self, sampling_time_mus: f64, sipm_size_mm2: f64) -> f64 {
         let freq = match self { // Hz
             Medium::Xenon   => 0.137   , // https://www.sciencedirect.com/science/article/pii/S0168900224002730
             Medium::Argon   => 0.978e-5, // extrapolated from above
