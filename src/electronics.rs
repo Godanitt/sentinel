@@ -18,12 +18,16 @@ pub fn digitize_sensor_hits(sensor_hits: Vec<SensorHit>, nsens: usize, ntime: us
     }
 
     let     event = sensor_hits.first().unwrap().event;
-    let mut data  = Array2::zeros((nsens, ntime));
+    let mut data  = Array2::<u16>::zeros((nsens, ntime));
 
     for sh in sensor_hits.into_iter() {
         let id    = sensor_db.get_index(sh.sensor_id).expect("Unknown sensor_id");
         let index = (sh.t as f64 / sampling_time).floor() as usize;
-        data[[id, index]] += 1;
+
+        // micro optimization to avoid double lookup
+        // data[[id, index]] = data[[id, index]].saturating_add(1);
+        let item = data.get_mut((id, index)).unwrap();
+        *item = item.saturating_add(1);
     }
 
     Waveforms{event, data}
@@ -54,6 +58,6 @@ pub fn add_noise(wfs: Waveforms<u16>, p: f64) -> Waveforms<u16> {
     let Waveforms{event, mut data} = wfs;
 
     data.iter_mut()
-        .for_each(|v| *v += poisson(p) as u16);
+        .for_each(|v| *v += v.saturating_add(poisson(p) as u16));
     Waveforms{event, data}
 }
