@@ -87,7 +87,8 @@ pub fn main() -> Result<()> {
 
     rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
 
-    let timer = Instant::now();
+    let     timer = Instant::now();
+    let mut n_ok  = 0;
 
     for ihits in events.into_iter() {
         let mut sensor_hits : Vec<SensorHit> =
@@ -145,13 +146,15 @@ pub fn main() -> Result<()> {
 
         sensor_hits.append(&mut s2_sensor_hits);
         sensor_hits.sort_by(|a, b| b.event.cmp(&a.event));
-        writer.write_many(sensor_hits)?;
+        if !sensor_hits.is_empty() { n_ok += 1; }
 
+        writer.write_many(sensor_hits)?;
         pb.inc(1);
     }
     pb.finish();
 
     let exe_time = timer.elapsed().as_secs_f64();
+    println!( "{}/{} = {:.1}% events produced signal", n_ok, n_evt, n_ok as f32 / n_evt as f32 * 100.0);
     println!( "Execution time for {} events: {:.2} s => {:.1} event/s or {:.8} s/event"
             , n_evt
             , exe_time
