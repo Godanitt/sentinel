@@ -1,3 +1,7 @@
 buffer_size_mus   = 504
-sampling_time_mus =  0.016
+sampling_time_mus =   0.016
 sipm_size_mm2     =  36
+noise_std         =   0.1
+adc_per_pe        =  20.0
+pe_sigma          =   0.2
+baseline          =  30
