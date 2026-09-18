@@ -12,17 +12,18 @@ pub struct Waveforms<T> {
 }
 
 
-pub fn digitize_sensor_hits(sensor_hits: Vec<SensorHit>, nsens: usize, ntime: usize, sampling_time: f64, sensor_db: &SensorDB) -> Waveforms<u32> {
+pub fn digitize_sensor_hits(sensor_hits: Vec<SensorHit>, nsens: usize, ntime: usize, sampling_time: f64, pretrigger: f64, sensor_db: &SensorDB) -> Waveforms<u32> {
     if sensor_hits.len() == 0 {
         panic!("There should be at least one sensor hit here")
     }
 
+    let pretrigger = (pretrigger / sampling_time).floor() as usize;
     let     event = sensor_hits.first().unwrap().event;
     let mut data  = Array2::<u32>::zeros((nsens, ntime));
 
     for sh in sensor_hits.into_iter() {
         let id    = sensor_db.get_index(sh.sensor_id).expect("Unknown sensor_id");
-        let index = (sh.t as f64 / sampling_time).floor() as usize;
+        let index = (sh.t as f64 / sampling_time).floor() as usize + pretrigger;
 
         // micro optimization to avoid double lookup
         // data[[id, index]] = data[[id, index]].saturating_add(1);

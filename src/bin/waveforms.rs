@@ -10,7 +10,7 @@ use hdf5_metno as hdf5;
 
 use sentinel::invalid_input;
 use sentinel::configure::waveforms::Configure;
-use sentinel::electronics::{add_noise, apply_pulse_shape, digitize_sensor_hits, Waveforms};
+use sentinel::electronics::{add_dark_noise, add_pedestal, add_white_noise, apply_pulse_shape, digitize_sensor_hits, digitize_voltage, to_adc, Waveforms};
 use sentinel::io::{Writer, ArrayHdf5Writer, ScalarHdf5Writer, read_hdf5};
 use sentinel::io::hdf5_types::SensorHit;
 use sentinel::medium::Medium;
@@ -57,11 +57,11 @@ pub fn main() -> Result<()> {
     let shape  = vec![nsens, ntime];
 
     let evt_writer = ScalarHdf5Writer::<u64>::new(Rc::clone(&ofile), "/raw/events"   , 1024       ).unwrap();
-    let  wf_writer =  ArrayHdf5Writer::<f32>::new(Rc::clone(&ofile), "/raw/waveforms",  128, shape).unwrap();
+    let  wf_writer =  ArrayHdf5Writer::<u16>::new(Rc::clone(&ofile), "/raw/waveforms",  128, shape).unwrap();
 
-    let sensor_db   = SensorDB::pcolina();
-    let pulse_shape = args.medium.pulse_shape(conf.sampling_time_mus);
-    let noise_prob  = args.medium.noise_prob(conf.sampling_time_mus, conf.sipm_size_mm2);
+    let sensor_db       = SensorDB::pcolina();
+    let pulse_shape     = args.medium.pulse_shape(conf.sampling_time_mus);
+    let dark_noise_prob = args.medium.dark_noise_prob(conf.sampling_time_mus, conf.sipm_size_mm2);
     println!("Initialization time: {:?}", timer.elapsed().as_secs_f64());
 
     let shits   = read_hdf5::<SensorHit>(&args.input, "/MC/sensor_hits")?;
@@ -78,14 +78,17 @@ pub fn main() -> Result<()> {
 
     let timer = Instant::now();
 
-    let mut waveforms : Vec<Waveforms<f32>> =
+    let mut waveforms : Vec<Waveforms<u16>> =
         events.into_iter()
               .inspect(|_| pb.inc(1))
               .par_bridge()
-              .map(|shs| digitize_sensor_hits(shs, nsens, ntime, conf.sampling_time_mus, &sensor_db) )
-              .map(|wfs| add_noise(wfs, noise_prob))
+              .map(|shs| digitize_sensor_hits(shs, nsens, ntime, conf.sampling_time_mus, conf.pretrigger_mus, &sensor_db) )
+              .map(|wfs| add_dark_noise(wfs, dark_noise_prob))
               .map(|wfs| apply_pulse_shape(wfs, &pulse_shape) )
-              .map(|wfs| Waveforms{event: wfs.event, data: wfs.data.mapv(|v| v as f32)})
+              .map(|wfs| to_adc(wfs, conf.adc_per_pe, conf.pe_sigma))
+              .map(|wfs| add_white_noise(wfs, conf.noise_std))
+              .map(|wfs| digitize_voltage(wfs))
+              .map(|wfs| add_pedestal(wfs, conf.baseline))
               .collect();
 
     pb.finish();

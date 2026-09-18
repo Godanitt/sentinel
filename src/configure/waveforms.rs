@@ -11,6 +11,7 @@ pub struct Configure {
     pub noise_std        : f64,
     pub adc_per_pe       : f64,
     pub pe_sigma         : f64,
+    pub pretrigger_mus   : f64,
     pub baseline         : u16,
 }
 
@@ -47,6 +48,7 @@ mod tests {
         assert_float_eq!(c.noise_std        ,     0.1, ulps<=2);
         assert_float_eq!(c.adc_per_pe       ,    20.0, ulps<=2);
         assert_float_eq!(c.pe_sigma         ,     0.2, ulps<=2);
+        assert_float_eq!(c.pre_trigger_mus  ,    10.0, ulps<=2);
         assert_eq!      (c.baseline         ,      30);
     }
 
