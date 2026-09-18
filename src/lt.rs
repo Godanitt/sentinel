@@ -9,6 +9,7 @@ use crate::io::read_hdf5;
 use crate::io::hdf5_types::{S1LightTablePoint, S2LightTablePoint, DriftMapPoint};
 use crate::random::{exp_survival_n, choice_nonexhaustive};
 
+#[derive(Debug)]
 pub struct LTprob {
     pub sensor_id: u16,
     pub prob     : f64,
