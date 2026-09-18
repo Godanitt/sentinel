@@ -5,7 +5,7 @@ drift_length = 120.0
 
 field_file = "/home/gonzalo/data/COLINA/comsol/pCOLINA_triangular_efield_ring_degrad_4.5_form_factor_1.txt"
 
-t_step = 1e-2
+t_step = 5e-2
 
 field_to_mm     = 1e3
 field_to_Vpercm = 0.01
