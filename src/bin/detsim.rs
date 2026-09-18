@@ -98,7 +98,7 @@ pub fn main() -> Result<()> {
                      let n_ave = ihit.e as f64 * 1e6 / args.medium.w_s();// hits come in MeV, w_s is in eV
                      let n_ph  = poisson(n_ave) as f64;
                      s1_lt.get(ihit.z, ihit.x, ihit.y)
-                          .iter()
+                          .iter() // over sensors
                           .map(move |p| (p.sensor_id, poisson(p.prob*n_ph)))
                           .filter(|(_, n)| *n>0)
                           .flat_map(move |(sid, n)| (0..n).map(move |_| (event, sid)))
@@ -132,7 +132,7 @@ pub fn main() -> Result<()> {
                  })
                  .flat_map_iter(|(evt, ie_time, ep)| {
                      s2_lt.get(ep.x, ep.y)
-                          .iter()
+                          .iter() // over sensors
                           .map(|p| (p.sensor_id, poisson(p.prob*args.medium.light_yield())))
                           .filter(|(_, n)| *n>0)
                           .flat_map(move |(sid, n)| (0..n).map(move |_| (evt, ie_time, sid)))
