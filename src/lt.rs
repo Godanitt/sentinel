@@ -58,7 +58,7 @@ impl S1LightTable {
         Ok(Self{probs, tree})
     }
 
-    pub fn get(&self, x: f32, y: f32, z: f32) -> &Vec<LTprob> {
+    pub fn get(&self, z: f32, x: f32, y: f32) -> &Vec<LTprob> {
         let index = self.tree.nearest_one::<SquaredEuclidean>(&[z, x, y]).item;
         self.probs.get(index as usize).unwrap()
     }
