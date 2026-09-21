@@ -56,13 +56,15 @@ pub fn main() -> Result<()> {
     let ntime  = (conf.buffer_size_mus / conf.sampling_time_mus).ceil() as usize;
     let shape  = vec![nsens, ntime];
 
-    let evt_writer = ScalarHdf5Writer::<u64>::new(Rc::clone(&ofile), "/raw/events"   , 1024       ).unwrap();
-    let  wf_writer =  ArrayHdf5Writer::<u16>::new(Rc::clone(&ofile), "/raw/waveforms",  128, shape).unwrap();
+    let evt_writer = ScalarHdf5Writer::<u64>::new(Rc::clone(&ofile), "/Waveforms/event_id"  , 1024       ).unwrap();
+    let chn_writer = ScalarHdf5Writer::<u16>::new(Rc::clone(&ofile), "/Waveforms/channel_id", 1024       ).unwrap();
+    let  wf_writer =  ArrayHdf5Writer::<u16>::new(Rc::clone(&ofile), "/Waveforms/adcs"      ,  128, shape).unwrap();
 
     let sensor_db       = SensorDB::pcolina();
     let pulse_shape     = args.medium.pulse_shape(conf.sampling_time_mus);
     let dark_noise_prob = args.medium.dark_noise_prob(conf.sampling_time_mus, conf.sipm_size_mm2);
     println!("Initialization time: {:?}", timer.elapsed().as_secs_f64());
+
 
     let shits   = read_hdf5::<SensorHit>(&args.input, "/MC/sensor_hits")?;
     let events  = shits.into_iter()
@@ -98,6 +100,10 @@ pub fn main() -> Result<()> {
         evt_writer.write(wf.event)?;
          wf_writer.write(wf.data)?;
     }
+    for channel in sensor_db.sensor_id {
+        chn_writer.write(channel)?;
+    }
+
 
     let exe_time = timer.elapsed().as_secs_f64();
     println!( "Execution time for {} events: {:.2} s => {:.1} evt/s or {:.8} s/evt"
