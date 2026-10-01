@@ -95,7 +95,7 @@ pub fn main() -> Result<()> {
 
     pb.finish();
 
-    waveforms.sort_by(|a, b| b.event.cmp(&a.event));
+    waveforms.sort_by(|a, b| a.event.cmp(&b.event));
     for wf in waveforms {
         evt_writer.write(wf.event)?;
          wf_writer.write(wf.data)?;
