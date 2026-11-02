@@ -1,0 +1,19 @@
+grid:
+  size_mm: 0.25
+  electrons_per_cell: 100
+
+# Región de generación: el mapa no distingue LXe de PTFE.
+# El rango de ejemplo queda dentro de las muestras finitas de COMSOL.
+bounds:
+  unit: "mm"
+  r: [0,50]
+  z: [0,100]
+
+electric_field:
+  file: "data/fields/Full_output.txt"
+
+output:
+  directory: "outputs/TPC_Avanzada"
+  save_trajectories: false
+  save_endpoints: true
+  save_summary: true

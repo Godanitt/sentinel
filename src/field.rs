@@ -45,6 +45,29 @@ impl Field {
         Field::new(field_points)
     }
 
+    /// Vector map in mm and V/cm, prepared from a checked COMSOL header by Python.
+    /// Keep invalid samples so nearest-neighbour lookup cannot bridge NaN regions.
+    pub fn from_vector_file(filename: &str) -> std::io::Result<Self> {
+        use std::io::{BufRead, BufReader, Error, ErrorKind};
+        use nalgebra::Vector2;
+        let mut points = Vec::new();
+        for (index, line) in BufReader::new(std::fs::File::open(filename)?).lines().enumerate() {
+            let line = line?;
+            let values: Result<Vec<f64>, _> = line.split_whitespace().map(str::parse).collect();
+            let row = values.map_err(|_| Error::new(ErrorKind::InvalidData, format!("Invalid field row {}", index+1)))?;
+            if row.len() != 4 || !row[0].is_finite() || !row[1].is_finite() || row[0] < 0. {
+                return Err(Error::new(ErrorKind::InvalidData, "Expected finite r>=0, z, Er, Ez"));
+            }
+            let direction = Vector2::new(-row[2], -row[3]); // electrons drift opposite E
+            let mag = direction.norm();
+            points.push(FieldPoint::new(Point2::new(row[0], row[1]), mag, 0, direction));
+        }
+        if points.is_empty() || !points.iter().any(|p| p.mag.is_finite() && p.mag > 0.) {
+            return Err(Error::new(ErrorKind::InvalidData, "No valid nonzero field vectors"));
+        }
+        Ok(Self::new(points))
+    }
+
     pub fn find_nearest(&self, pos: &Point3<f64>) -> &FieldPoint {
         let r   = (pos.x*pos.x + pos.y*pos.y).sqrt();
         let z   = pos.z;
@@ -116,4 +139,19 @@ mod tests {
         assert_float_eq!(c3.r(), points[3].r(), ulps <= 2);
     }
 
+
+    #[test]
+    fn vector_field_preserves_z_and_electron_sign() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "1 2 3 -4").unwrap();
+        writeln!(file, "2 2 NaN NaN").unwrap();
+        let field = Field::from_vector_file(file.path().to_str().unwrap()).unwrap();
+        let point = field.find_nearest(&Point3::new(1., 0., 2.));
+        assert_float_eq!(point.mag, 5., abs <= 1e-12);
+        assert_float_eq!(point.dir.x, -0.6, abs <= 1e-12);
+        assert_float_eq!(point.dir.y, 0.8, abs <= 1e-12);
+        assert_float_eq!(point.z(), 2., abs <= 1e-12);
+        assert!(field.find_nearest(&Point3::new(2., 0., 2.)).mag.is_nan());
+    }
 }

@@ -1,350 +1,126 @@
-[![built with nix](https://builtwithnix.org/badge.svg)](https://builtwithnix.org)
+# SENTINEL
 
-# sentinel
+Transporte de electrones en líquidos nobles con un motor Rust y una interfaz Python sencilla. Python prepara las posiciones iniciales; Rust mantiene la deriva, la difusión y la propagación en tres dimensiones.
 
-**S**implified **E**lectro**N** **T**ransport **I**n **N**obl**E** **L**iquids is a Rust toolkit for simulating electron transport and detector readout in a noble-liquid detector. It models drift through a field map in a tapered cylindrical geometry, converts ionization energy deposits into SiPM hits using light tables, and digitizes those hits into DAQ-like waveforms.
+## Empezar en Ubuntu / WSL
 
-The repository contains four command-line programs:
+Desde la raíz del repositorio:
 
-| Program | Purpose | Input | Output |
-| --- | --- | --- | --- |
-| `trajectories` | Propagate sampled electrons and write every drift point. | Field/configuration files | HDF5 `/trajectories` or whitespace-separated text |
-| `endpoints` | Propagate sampled electrons and write only start/end points. | Field/configuration files | HDF5 `/endpoints` or whitespace-separated text |
-| `detsim` | Turn ionization deposits into simulated S1/S2 SiPM hits. | MC HDF5 + light-table HDF5 | HDF5 `/MC/sensor_hits` |
-| `waveforms` | Turn SiPM hits into 125-channel digitized waveforms. | HDF5 `/MC/sensor_hits` | HDF5 `/Waveforms/*` |
-
-The normal detector-readout pipeline is:
-
-```text
-MC /MC/ionization_hits + light tables /S1/LT and /S2/LT
-                              │
-                              ▼
-                         detsim
-                              │  /MC/sensor_hits
-                              ▼
-                         waveforms
-                              │  /Waveforms/adcs
-                              ▼
-                         DAQ-like data
-```
-
-`trajectories` and `endpoints` are independent transport tools and are useful for checking field maps, geometry, diffusion, and drift times.
-
-## Installation
-
-The supported development environment is Nix on `x86_64-linux`. The flake supplies the Rust toolchain pinned by [rust-toolchain.toml](rust-toolchain.toml), HDF5 development libraries, `just`, `cargo-nextest`, and `bacon`.
-
-### Recommended: Nix and direnv
-
-Install Nix with flakes enabled. The [Determinate Nix Installer](https://determinate.systems/nix-installer) provides instructions for Linux, macOS, and WSL. Install `direnv` if it is not already available:
-
-```sh
-nix profile add nixpkgs#direnv
-```
-
-Enable its shell hook once. For zsh:
-
-```sh
-eval "$(direnv hook zsh)"
-```
-
-For bash:
-
-```sh
-eval "$(direnv hook bash)"
-```
-
-You probably want to enable the hook automatically whenever you start a new shell. Add the appropriate command to your shell configuration file:
-
-```sh
-# zsh
-echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc
-# or: echo 'eval "$(direnv hook zsh)"' >> ~/.zsh_profile
-
-# bash
-echo 'eval "$(direnv hook bash)"' >> ~/.bashrc
-# or: echo 'eval "$(direnv hook bash)"' >> ~/.bash_profile
-```
-
-From the repository root, allow the checked-in `.envrc` and enter the development environment:
-
-```sh
-direnv allow
-```
-
-The first activation may download flake inputs and build the environment, which might take a while. The `.envrc` runs `use flake`, so subsequent shells in this directory automatically receive the configured Rust and HDF5 environment.
-
-If `direnv` is not available, activate the same environment manually:
-
-
-```sh
+```bash
 nix develop
+cargo build --release --bins
+/home/colina/.venv/bin/python -m pip install -r python/requirements.txt
+/home/colina/.venv/bin/python scripts/run_simulation.py --config configs/initial_conditions.yaml
 ```
 
-## Build
+Se utiliza el entorno Python existente, sin crear otro. Si Cargo está disponible, el lanzador compila una vez cuando falta el binario release o cambia el código. Fuera del entorno Nix, el ejecutable debe poder encontrar sus bibliotecas HDF5; ejecuta el comando dentro de `nix develop`.
 
-Build all four binaries in debug mode:
+## Elegir una campaña
 
-```sh
-just build
-```
-The executables are written to `target/debug/` or `target/release/`. Use the `just release` wrapper to (compile and) run a release binary and see its command-line options:
+Cada YAML de `configs/` representa una campaña independiente. Duplica `initial_conditions.yaml` con el nombre que prefieras, por ejemplo `tpc_campo_a.yaml` y `tpc_campo_b.yaml`. En cada copia cambia `electric_field.file`, las condiciones iniciales y `output.directory` (por ejemplo `outputs/tpc_campo_a`). No hace falta editar Python.
 
-```sh
-just release trajectories --help
-just release endpoints --help
-just release detsim --help
-just release waveforms --help
-```
+Desde WSL, dentro de `nix develop`, ejecutar sin argumentos abre un selector:
 
-`just` provides short wrappers around the common Cargo commands:
+~~~bash
+/home/colina/.venv/bin/python scripts/run_simulation.py
+~~~
 
-```sh
-just build
-just debug trajectories --conf conf/test.toml --n-events 2 --batch-size 2 --output /tmp/trajectories.h5 --batch
-just release endpoints --conf conf/test.toml --n-events 2 --batch-size 2 --output /tmp/endpoints.h5 --batch
-just clean
-```
+También puedes elegir directamente o listar sin ejecutar:
 
-All commands below assume they are run from the repository root. The programs resolve relative paths such as `data/...` from the current working directory, not from the directory containing the configuration file.
+~~~bash
+/home/colina/.venv/bin/python scripts/run_simulation.py --config configs/initial_conditions.yaml
+/home/colina/.venv/bin/python scripts/run_simulation.py --list-configs
+~~~
 
-## Quick start: self-contained transport example
+Desde IPython, situado en la raíz del proyecto y usando el mismo entorno WSL/Nix. El lanzador descarta el `--f=...` que Jupyter añade al kernel:
 
-[conf/test.toml](conf/test.toml) uses the bundled homogeneous field map, a small cone, and a fixed starting point. It is intended for a smoke test rather than a production detector configuration. Use a batch size that divides the requested event count:
+~~~ipython
+%run scripts/run_simulation.py
+%run scripts/run_simulation.py --config configs/initial_conditions.yaml
+~~~
 
-```sh
-mkdir -p results
+El selector permite introducir varios números separados por comas o `*` para ejecutar todas las campañas. También se pueden indicar varios YAML en `--config`:
 
-just release endpoints \
-  --conf conf/test.toml \
-  --n-events 2 \
-  --batch-size 2 \
-  --output results/endpoints.h5 \
-  --threads 2 \
-  --batch
-```
+~~~bash
+/home/colina/.venv/bin/python scripts/run_simulation.py --config configs/tpc_campo_a.yaml configs/tpc_campo_b.yaml
+~~~
 
-To write a human-readable text file instead:
+El botón **Run Python File** de VS Code también muestra el selector si utiliza el intérprete `/home/colina/.venv/bin/python` y la terminal del entorno Nix. Antes de simular se muestran el YAML elegido, el campo y la carpeta base de resultados.
 
-```sh
-just release trajectories \
-  --conf conf/test.toml \
-  --n-events 2 \
-  --batch-size 2 \
-  --output results/trajectories.txt \
-  --threads 2 \
-  --csv \
-  --batch
-```
-
-The `--csv` output is whitespace-separated text, not comma-separated CSV. Its headers are `event x y z t` for trajectories and `event x0 y0 z0 x1 y1 z1 t` for endpoints.
-
-HDF5 command-line tools are available in the Nix environment. For example:
-
-```sh
-h5dump -n results/endpoints.h5
-```
-
-Outputs are not overwritten by default. Add `--overwrite` when intentionally replacing an existing file; parent directories must already exist.
-
-## Transport programs
-
-### Geometry and field propagation
-
-The transport code uses a tapered cylindrical (cone-like) active region:
+## Organización
 
 ```text
-z = 0 .. neck_length + drift_length
-r(z) = rmin + form_factor * max(z - neck_length, 0)
+configs/                    Solo YAML: condiciones iniciales y prueba pequeña
+conf/                       TOML internos de los programas originales
+data/fields/Full_output.txt  Exportación original de TPC_Avanzada
+data/                       Tablas físicas y datos de ejemplo existentes
+python/sentinel_interface/  Configuración, rejilla y ejecución
+python/tests/               Pruebas de integración
+scripts/run_simulation.py   Punto de entrada
+src/                        Motor Rust y ejecutables
+outputs/                    Resultados; cada ejecución en su propia carpeta
+outputs/legacy/             Resultados anteriores conservados
+dev/                        Recetas just y entrada Nix heredada
+docs/original-cli.md         Referencia de los cuatro programas originales
 ```
 
-At every step, the tracker finds the nearest point in the supplied axisymmetric field map, interpolates the liquid-xenon drift velocity from [data/drift_velocity_gushchin.dat](data/drift_velocity_gushchin.dat), and adds transverse and longitudinal diffusion. Positions are in millimetres and drift times are in microseconds after the configured field conversion.
+Los manifiestos Cargo, el toolchain Rust y la flake Nix permanecen en la raíz para que las herramientas los encuentren automáticamente.
 
-`trajectories` writes one record for every propagated point. `endpoints` writes one record per sampled electron. Both use the same configuration and support:
+## Configuración y salidas
 
-| Option | Meaning | Default |
-| --- | --- | --- |
-| `-c, --conf PATH` | TOML configuration. | required |
-| `-n, --n-events N` | Number of requested events. | required |
-| `-b, --batch-size N` | Number of events processed per write batch. | `1000` |
-| `-o, --output PATH` | Output HDF5 or text path. | required |
-| `-t, --threads N` | Rayon worker threads. | `10` |
-| `--csv` | Write whitespace-separated text instead of HDF5. | off |
-| `--batch` | Suppress the interactive progress bar. | off |
-| `--overwrite` | Allow an existing output file to be replaced. | off |
+Edita [configs/initial_conditions.yaml](configs/initial_conditions.yaml). Las rutas relativas del YAML se resuelven desde la raíz del repositorio, incluso al lanzar Python desde otra carpeta. El tamaño de celda siempre se expresa en mm; `bounds.unit` admite mm o cm. Las celdas del borde se recortan si el intervalo no es múltiplo del tamaño.
 
-The HDF5 datasets have these fields:
+Cada celda recibe exactamente `electrons_per_cell` posiciones aleatorias uniformes en volumen anular, con `r >= 0`, `phi = 0`, `x = r`, `y = 0`. La difusión posterior permite salir de ese plano. El identificador `event` identifica un electrón; `cell_id` identifica su celda. No dependen del orden de finalización de los hilos.
 
-```text
-/trajectories: event, x, y, z, t
-/endpoints:    event, x0, y0, z0, x1, y1, z1, t
+El ejemplo inicial usa una celda pequeña dentro del mapa, con 1000 electrones. Amplía los límites cuando hayas seleccionado la región de interés. Para una primera comprobación de solo tres electrones:
+
+```bash
+/home/colina/.venv/bin/python scripts/run_simulation.py --config configs/smoke_test.yaml
 ```
 
-The current batching loop processes a complete `--batch-size` block even for the final partial block. For an exact event count, choose a batch size that divides `--n-events`.
+Los resultados quedan bajo `outputs/<campaña>/AAAA_MM_DD/runNN/`, usando el nombre del YAML como campaña (por ejemplo `outputs/initial_conditions/2026_05_12/run01/`). El contador continúa con `run02`, `run03`, etc. si ya existe una carpeta del día para esa campaña. Nunca se reutiliza una carpeta de ejecución:
 
-### Transport configuration
+- `initial_positions.h5`: datasets `initial_positions`, `cells` y `event_cells`, siempre conservados.
+- `endpoints.h5`: dataset original `endpoints`, solo si se activa.
+- `trajectories.h5`: dataset original `trajectories`, solo si se activa.
+- `summary.h5`: recuentos administrativos por celda, solo si se activa.
+- `configs/initial_conditions.yaml`: copia exacta de la configuración utilizada.
+- `run.txt`: ruta y SHA256 del campo, modo y tiempo de ejecución.
 
-The transport configuration is loaded by both `trajectories` and `endpoints`:
+Todas las salidas activadas incluyen `event_cells` con `event_id` y `cell_id`. Si alguna posición inicial generada en una celda cae fuera del soporte del mapa o sobre una muestra de campo inválida/nula, se descarta la celda completa y el resto continúa. `initial_positions.h5` conserva solo los electrones de celdas aceptadas; `summary.h5` refleja cuántos se generaron y procesaron por celda. Los nombres y tipos originales de endpoints y trayectorias se conservan. Las posiciones son mm y los tiempos µs. El tiempo del endpoint coincide con el último punto de su trayectoria. Si se activan ambas salidas, se simula una sola vez. Solo endpoints no almacena los pasos intermedios. Si falla el transporte de un electrón después de iniciar, se interrumpe la ejecución y se conserva `FAILED.txt`.
 
-| Key | Meaning |
-| --- | --- |
-| `rmin` | Radius of the neck, in mm. |
-| `form_factor` | Radial increase per mm above the neck. |
-| `neck_length` | Cylindrical neck length, in mm. |
-| `drift_length` | Conical drift length, in mm. |
-| `field_file` | COMSOL-style field export. The loader skips eight header lines and expects `r z streamline field` columns. |
-| `field_to_mm` | Coordinate conversion applied to the field file. |
-| `field_to_Vpercm` | Field-magnitude conversion applied to the field file. |
-| `field_invert_z` | Stored in the configuration; the current binaries always enable z inversion when loading the field, so changing this value currently has no runtime effect. |
-| `t_step` | Propagation step, in microseconds. |
-| `generator` | Initial-position sampler; see below. |
+Lectura desde Python, con Pandas si está instalado:
 
-Available generator values are:
+```python
+from pathlib import Path
+import h5py
+import pandas as pd
 
-```toml
-generator = "Volume"
-generator = "Surface"
-generator = "CathodeCenter"
-generator = "Center"
-generator = { FixedPos = [0.0, 0.0, 9.0] }
-generator = { Plane = 1.57079632679 } # angle in radians
-generator = { Edge = 0.1 }             # distance from wall/cathode, in mm
-generator = { FromFile = "input.h5" } # reads /MC/ionization_hits positions
+run = Path("outputs/initial_conditions/2026_05_12/run01")
+with h5py.File(run / "endpoints.h5") as f:
+    endpoints = pd.DataFrame.from_records(f["endpoints"][:])
+    mapping = pd.DataFrame.from_records(f["event_cells"][:])
+endpoints = endpoints.merge(mapping, left_on="event", right_on="event_id", validate="one_to_one")
 ```
 
-`Volume`, `Surface`, `Plane`, and `Edge` sample the configured cone. `FromFile` consumes ionization hits from the HDF5 dataset `/MC/ionization_hits` in sequence.
+## Campo y límites del modelo
 
-## Detector simulation
+El archivo COMSOL adjunto se conserva sin cambios. Su cabecera contiene `r, z, es.Er, es.Ephi, es.Ez, V, es.normE`: el lector convierte m a mm y V/m a V/cm, mantiene el eje z sin invertir y deriva en la dirección opuesta a `(Er, Ez)`. `Ephi` es cero en este mapa; una componente azimutal no nula se rechaza explícitamente. El módulo vectorial calcula la magnitud a partir de Er/Ez y conserva las transformaciones cilíndricas del motor. No incorpora modelos nuevos de transporte.
 
-`detsim` converts ionization deposits into S1 and S2 sensor hits. It requires:
+Los `bounds` del YAML **solo seleccionan posiciones iniciales**. No representan ánodo, cátodo ni paredes. Para COMSOL, el límite de transporte es el dominio numérico muestreado del mapa y las zonas cuyo punto más cercano tiene campo inválido o nulo. No se aplica el cono de ejemplo a TPC_Avanzada. La consulta del campo sigue siendo por vecino más próximo, como en SENTINEL: no es una reconstrucción de superficies ni una máscara de materiales. Los NaN no se rellenan.
 
-1. An input HDF5 file containing `/MC/ionization_hits`.
-2. A light-table HDF5 file containing `/S1/LT` and `/S2/LT`.
-3. A detector configuration containing all transport fields plus `lifetime` in microseconds.
+El mapa disponible tiene 40000 muestras; 36916 contienen componentes finitas. Sus coordenadas cubren aproximadamente r = 0.1425–56.8575 mm y z = −1.74–101.74 mm. La existencia de campo no identifica LXe: puede incluir PTFE. Selecciona límites adecuados; no se garantiza excluir materiales. Los endpoints en límites numéricos no constituyen una clasificación física de colección. Un inicio inválido se rechaza; alcanzar 2000000 pasos produce un error explícito. El paso del modo vectorial es 0.01 µs, con las parametrizaciones de velocidad y difusión existentes.
 
-The repository includes [data/kr_hits.h5](data/kr_hits.h5), a small example MC file. It does not include a light-table file. The required light-table records are:
+Las líneas de campo de ejemplo siguen usando el lector original y las convenciones internas de [conf/test.toml](conf/test.toml), incluido el cono original, conversiones e inversión de z. Para otros archivos de líneas de campo hay que revisar explícitamente ese TOML. Los binarios originales `endpoints`, `trajectories`, `detsim` y `waveforms` siguen disponibles; consulta [su referencia](docs/original-cli.md).
 
-```text
-/S1/LT: sensor_id, z, x, y, nevt, prob
-/S2/LT: sensor_id, x, y, nevt, prob
+El muestreo con phi fijo se limita al caso axisimétrico inicial. No incluye hilos, geometrías realistas, máscaras de materiales ni análisis físico posterior.
+
+## Comprobaciones
+
+```bash
+cargo test --release
+PYTHONPATH=python /home/colina/.venv/bin/python -m unittest discover -s python/tests -v
+just --justfile dev/justfile test
 ```
 
-The input ionization records are:
-
-```text
-/MC/ionization_hits: event, track_id, x, y, z, e
-```
-
-Here `x`, `y`, and `z` are positions in mm and `e` is an energy deposit in MeV. Events must be grouped contiguously in the input file because the program groups consecutive records by event ID.
-
-The production-like [conf/pcolina.toml](conf/pcolina.toml) contains a machine-specific absolute `field_file` path. Make a local copy and update that path before running, for example:
-
-```sh
-cp conf/pcolina.toml conf/pcolina-local.toml
-# edit field_file in conf/pcolina-local.toml
-```
-
-Then run:
-
-```sh
-mkdir -p results
-just release detsim \
-  --conf conf/pcolina-local.toml \
-  --input data/kr_hits.h5 \
-  --maps /absolute/path/to/light-tables.h5 \
-  --output results/sensor_hits.h5 \
-  --medium xenon \
-  --threads 8 \
-  --batch
-```
-
-The output dataset is:
-
-```text
-/MC/sensor_hits: event, sensor_id, t
-```
-
-`t` is in microseconds. The default and currently complete detector-simulation medium is Xenon. The CLI also lists Argon and Krypton, but their ionization/scintillation constants are not implemented in `detsim` and will panic if selected.
-
-## Waveform digitization
-
-`waveforms` consumes `/MC/sensor_hits` and applies the following chain independently for each event:
-
-1. Bin sensor hits into time samples, including the configured pre-trigger.
-2. Add Poisson dark noise.
-3. Convolve with the bundled Xenon or Argon pulse shape.
-4. Apply photoelectron gain fluctuations and ADC-per-photoelectron scaling.
-5. Add white noise.
-6. Quantize to `u16` and apply the configured pedestal convention.
-
-Run it on the detector-simulation output with:
-
-```sh
-just release waveforms \
-  --conf conf/electronics.toml \
-  --input results/sensor_hits.h5 \
-  --output results/waveforms.h5 \
-  --medium xenon \
-  --threads 8
-```
-
-The electronics configuration contains:
-
-| Key | Meaning |
-| --- | --- |
-| `buffer_size_mus` | Waveform duration, in microseconds. |
-| `sampling_time_mus` | Sampling interval, in microseconds. |
-| `sipm_size_mm2` | SiPM active area used for dark-noise probability. |
-| `noise_std` | White-noise standard deviation. |
-| `adc_per_pe` | ADC scale per photoelectron. |
-| `pe_sigma` | Relative gain spread. |
-| `pretrigger_mus` | Time before the trigger, in microseconds. |
-| `baseline` | `u16` pedestal value. |
-
-The buffer duration must be a multiple of the sampling interval. The supplied configuration produces `6250` samples per channel (`100 µs / 0.016 µs`) for `125` fixed pCOLINA channels. The output datasets are:
-
-```text
-/Waveforms/event_id   # one u64 event ID per waveform
-/Waveforms/channel_id # 125 u16 sensor IDs, in waveform channel order
-/Waveforms/adcs       # u16 array with shape (events, 125, time samples)
-```
-
-Waveform input events must also be grouped contiguously. Events with no sensor hits are absent from the input and therefore absent from the waveform output. Xenon and Argon pulse-shape data are bundled; Krypton waveform processing is not implemented.
-
-## Configuration files and bundled data
-
-| Path | Role |
-| --- | --- |
-| [conf/test.toml](conf/test.toml) | Small self-contained homogeneous-field transport test. |
-| [conf/pcolina.toml](conf/pcolina.toml) | Reduced pCOLINA geometry; includes detector lifetime but an absolute, machine-specific field path. |
-| [conf/colina.toml](conf/colina.toml) | Full-size geometry template; its field path is machine-specific and it does not include `lifetime`, so add that key before using it with `detsim`. |
-| [conf/electronics.toml](conf/electronics.toml) | Waveform buffer, sampling, noise, gain, and pedestal settings. |
-| [data/homogeneous_field.dat](data/homogeneous_field.dat) | Small COMSOL-style homogeneous field used by the test configuration. |
-| [data/partial_efield.dat](data/partial_efield.dat) | Larger partial field-map export. |
-| [data/drift_velocity_gushchin.dat](data/drift_velocity_gushchin.dat) | Drift-velocity lookup table used by the tracker. |
-| `data/pulse_shape_vuv4_lxe.csv` | Xenon pulse shape. |
-| `data/pulse_shape_vuv4_lar.csv` | Argon pulse shape. |
-| [data/kr_hits.h5](data/kr_hits.h5) | Example ionization-hit input. |
-
-The field-map loader expects the numeric COMSOL export format used by the bundled files: eight header lines followed by four whitespace-separated columns. If a field map uses different units, adjust `field_to_mm` and `field_to_Vpercm` in a local configuration.
-
-## Development and tests
-
-Useful commands are:
-
-```sh
-just build
-just test
-just test-slow
-just verbose '<nextest filter expression>'
-```
-
-`just test` uses `cargo nextest` and `just test-slow` uses a release build. Tests that exercise HDF5 require the development environment so that `HDF5_DIR` and the HDF5 libraries are available.
-
-On the current branch, the waveform configuration test is stale: it refers to `pre_trigger_mus`, while the configuration field and production code use `pretrigger_mus`, and some of its expected values no longer match [conf/electronics.toml](conf/electronics.toml). This is separate from the HDF5 installation; `just build` still builds the applications.
-
-The simulation uses random sampling and has no command-line seed option, so repeated runs are not bit-for-bit reproducible.
-
-## License
-
-sentinel is distributed under the [GNU General Public License, version 3](LICENSE).
+Las pruebas de Python comprueban la rejilla, unidades, IDs, los ocho estados de los booleanos, coherencia endpoints/trayectorias, difusión en 3D, HDF5 y una simulación pequeña con el campo real.

@@ -42,14 +42,14 @@ mod tests {
     #[test]
     fn test_new() {
         let c = Configure::new("conf/electronics.toml").unwrap();
-        assert_float_eq!(c.buffer_size_mus  ,   504.0, ulps<=2);
+        assert_float_eq!(c.buffer_size_mus  ,   100.0, ulps<=2);
         assert_float_eq!(c.sampling_time_mus,   16e-3, ulps<=2);
         assert_float_eq!(c.sipm_size_mm2    , 6.0*6.0, ulps<=2);
         assert_float_eq!(c.noise_std        ,     0.1, ulps<=2);
         assert_float_eq!(c.adc_per_pe       ,    20.0, ulps<=2);
         assert_float_eq!(c.pe_sigma         ,     0.2, ulps<=2);
-        assert_float_eq!(c.pre_trigger_mus  ,    10.0, ulps<=2);
-        assert_eq!      (c.baseline         ,      30);
+        assert_float_eq!(c.pretrigger_mus  ,    10.0, ulps<=2);
+        assert_eq!      (c.baseline         ,  65_000);
     }
 
     #[test]

@@ -58,7 +58,7 @@ pub fn main() -> Result<()> {
     rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
 
     let geometry   = Cone::new(conf.rmin, conf.form_factor, conf.neck_length, conf.drift_length);
-    let field      = Field::from_file(&conf.field_file, conf.field_to_mm, conf.field_to_Vpercm, conf.neck_length, true);
+    let field      = Field::from_file(&conf.field_file, conf.field_to_mm, conf.field_to_Vpercm, conf.neck_length, conf.field_invert_z);
     let tracker    = Tracker::new(field, geometry.clone(), conf.t_step);
     let sampler    = conf.generator.sampler(&geometry);
 
@@ -77,19 +77,19 @@ pub fn main() -> Result<()> {
 
     println!("Initialization time: {:?}", timer.elapsed().as_secs_f64());
 
+    if args.batch_size == 0 { return invalid_input!("batch_size must be positive"); }
     let nbatch = args.n_events.div_ceil(args.batch_size);
     let pb = MaybeProgressBar::new(nbatch, args.batch);
 
     let timer = Instant::now();
     for batch in 0..nbatch {
         let data : Vec<Endpoint> =
-        (0..args.batch_size).into_par_iter()
+        (0..args.batch_size.min(args.n_events - batch * args.batch_size)).into_par_iter()
                             .filter_map( |evt| {
                                 let evt = evt + batch * args.batch_size;
 
                                 sampler.sample(&geometry).map(|starting_pos| {
-                                    let trajectory = tracker.propagate_from(starting_pos.clone());
-                                    let last = trajectory.last().unwrap();
+                                    let (last, steps) = tracker.propagate_endpoint(starting_pos);
                                     Endpoint{ event: evt as u32
                                             , x0   : starting_pos.x as f32
                                             , y0   : starting_pos.y as f32
@@ -97,7 +97,7 @@ pub fn main() -> Result<()> {
                                             , x1   :         last.x as f32
                                             , y1   :         last.y as f32
                                             , z1   :         last.z as f32
-                                            , t    : trajectory.len() as f32 * conf.t_step as f32
+                                            , t    : steps as f32 * conf.t_step as f32
                                             }
                                 })
                             })

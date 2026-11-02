@@ -35,7 +35,7 @@ impl<G: Geometry> Tracker<G> {
     }
 
     pub fn propagate_from(&self, pos: Point3<f64>) -> Vec<Point3<f64>> {
-        let mut trajectory : Vec<Point3<f64>> = Vec::with_capacity(1_000_000);
+        let mut trajectory : Vec<Point3<f64>> = Vec::new();
         trajectory.push(pos);
 
         while self.geometry.is_within(trajectory.last().unwrap()) {
@@ -45,6 +45,49 @@ impl<G: Geometry> Tracker<G> {
             trajectory.push(next_pos);
         }
         trajectory
+    }
+
+    /// Same transport as propagate_from, without storing the trajectory.
+    pub fn propagate_endpoint(&self, mut pos: Point3<f64>) -> (Point3<f64>, usize) {
+        let mut steps = 0;
+        while self.geometry.is_within(&pos) {
+            pos += self.compute_step(&pos);
+            steps += 1;
+        }
+        (pos, steps)
+    }
+
+    pub fn valid_start(&self, pos: &Point3<f64>) -> bool {
+        if !pos.coords.iter().all(|v| v.is_finite()) || !self.geometry.is_within(pos) {
+            return false;
+        }
+        let field = self.field.find_nearest(pos);
+        field.mag.is_finite() && field.mag > 0. &&
+        field.dir.iter().all(|v| v.is_finite()) && field.dir.norm() > 0.
+    }
+
+    /// Bounded integration for the Python interface. Domain/invalid-field exits
+    /// are numerical endpoints, without any detector/material classification.
+    pub fn propagate_checked<F>(&self, mut pos: Point3<f64>, max_steps: usize, mut visit: F)
+        -> std::io::Result<(Point3<f64>, usize)>
+    where F: FnMut(&Point3<f64>, usize) {
+        if !self.valid_start(&pos) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid starting position"));
+        }
+        visit(&pos, 0);
+        let mut steps = 0;
+        while self.valid_start(&pos) {
+            if steps >= max_steps {
+                return Err(std::io::Error::other("Transport step limit reached; check field and numerical domain"));
+            }
+            pos += self.compute_step(&pos);
+            if !pos.coords.iter().all(|v| v.is_finite()) {
+                return Err(std::io::Error::other("Non-finite transport step"));
+            }
+            steps += 1;
+            visit(&pos, steps);
+        }
+        Ok((pos, steps))
     }
 
     fn compute_step(&self, pos: &Point3<f64>) -> Vector3<f64> {
@@ -139,5 +182,20 @@ mod tests {
 
         assert!(t.len() > 1000, "Track length too short: {}", t.len());
         assert!(t.last().unwrap().z < 1e-3); // close to exit
+    }
+
+    #[test]
+    fn checked_transport_rejects_invalid_start_and_enforces_limit() {
+        let tracker = default_tracker();
+        assert!(tracker.propagate_checked(Point3::new(100., 0., 9.), 10, |_, _| {}).is_err());
+        assert!(tracker.propagate_checked(Point3::new(0., 0., 9.), 0, |_, _| {}).is_err());
+    }
+
+    #[test]
+    fn endpoint_only_transport_leaves_geometry() {
+        let tracker = default_tracker();
+        let (end, steps) = tracker.propagate_endpoint(Point3::new(0., 0., 9.));
+        assert!(steps > 0);
+        assert!(!tracker.geometry.is_within(&end));
     }
 }
